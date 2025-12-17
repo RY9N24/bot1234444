@@ -72,6 +72,7 @@ class NotificationBot:
                 GROUP_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.save_group)],
             },
             fallbacks=[CommandHandler("cancel", self.cancel)],
+            per_message=True,
         ))
 
         app.add_handler(ConversationHandler(
@@ -84,6 +85,7 @@ class NotificationBot:
                 CITY_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.save_city)],
             },
             fallbacks=[CommandHandler("cancel", self.cancel)],
+            per_message=True,
         ))
 
         app.add_handler(ConversationHandler(
@@ -97,6 +99,7 @@ class NotificationBot:
                 BROADCAST_SCOPE_STATE: [CallbackQueryHandler(self.save_broadcast_scope)],
             },
             fallbacks=[CommandHandler("cancel", self.cancel)],
+            per_message=True,
         ))
 
         app.add_handler(ConversationHandler(
@@ -110,6 +113,7 @@ class NotificationBot:
                 REM_TIME_STATE: [CallbackQueryHandler(self.reminder_adjust_time), MessageHandler(filters.TEXT & ~filters.COMMAND, self.reminder_manual_time)],
             },
             fallbacks=[CommandHandler("cancel", self.cancel)],
+            per_message=True,
         ))
 
         app.add_handler(CallbackQueryHandler(self.handle_reminder_action, pattern="^reminder_action"))
@@ -680,6 +684,10 @@ def main():
     token_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "TELEGRAM_TOKEN.txt")
     with open(token_path, "r", encoding="utf-8") as f:
         token = f.read().strip()
+    if not token or token.startswith("PUT_YOUR_TELEGRAM_BOT_TOKEN_HERE"):
+        raise SystemExit(
+            "TELEGRAM_TOKEN.txt не заполнен реальным токеном. Замените плейсхолдер на Bot API токен."
+        )
     bot = NotificationBot(token)
     bot.run()
 

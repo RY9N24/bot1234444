@@ -7,7 +7,21 @@ VENV_DIR="$SCRIPT_DIR/.venv"
 PYTHON_BIN="$VENV_DIR/bin/python3"
 LOG_DIR="$SCRIPT_DIR/logs"
 LOG_FILE="$LOG_DIR/bot.log"
+TOKEN_FILE="$SCRIPT_DIR/TELEGRAM_TOKEN.txt"
 ACTION="${1:-start}"
+
+check_token() {
+  if [ ! -s "$TOKEN_FILE" ]; then
+    echo "Файл с токеном ($TOKEN_FILE) отсутствует или пуст. Добавьте токен и повторите запуск." >&2
+    exit 1
+  fi
+  local token
+  token=$(head -n 1 "$TOKEN_FILE" | tr -d '\r\n')
+  if [[ "$token" == PUT_YOUR_TELEGRAM_BOT_TOKEN_HERE* ]]; then
+    echo "В файле $TOKEN_FILE оставлен плейсхолдер. Укажите реальный Telegram Bot API токен." >&2
+    exit 1
+  fi
+}
 
 command_exists() {
   command -v "$1" >/dev/null 2>&1
@@ -49,6 +63,8 @@ if [ "$ACTION" = "status" ]; then
   print_status
   exit $?
 fi
+
+check_token
 
 if [ ! -x "$PYTHON_BIN" ]; then
   echo "Не найден виртуальный интерпретатор $PYTHON_BIN. Сначала выполните ./install.sh" >&2

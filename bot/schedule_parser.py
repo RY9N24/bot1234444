@@ -22,8 +22,9 @@ class ScheduleParser:
         if end is None:
             end = start + dt.timedelta(days=6)
         params = {"id": group, "dateFrom": start.isoformat(), "dateTo": end.isoformat()}
+        headers = {"User-Agent": "Mozilla/5.0 (schedule-bot)"}
         try:
-            resp = requests.get(GROUP_URL, params=params, timeout=15)
+            resp = requests.get(GROUP_URL, params=params, timeout=15, headers=headers)
             if resp.status_code != 200:
                 logger.warning("Не удалось получить расписание для %s: %s", group, resp.status_code)
                 return None
@@ -32,7 +33,7 @@ class ScheduleParser:
             logger.exception("Ошибка при загрузке расписания для %s: %s", group, exc)
             return None
 
-        table = soup.find("table")
+        table = soup.find("table") or soup.select_one("div table")
         if not table:
             logger.warning("Ответ без таблицы расписания для %s (url %s)", group, resp.url)
             return None
@@ -59,10 +60,11 @@ class ScheduleParser:
     def refresh_cache(groups: List[str]) -> Dict[str, Dict[str, List[str]]]:
         cache: Dict[str, Dict[str, List[str]]] = {}
         today = dt.date.today()
-        # API страницы отдаёт неделю, которая начинается в воскресенье,
-        # поэтому подстраиваемся под их диапазон (вс- сб), чтобы таблица не была пустой.
+        # API страницы отдаёт неделю, которая начинается в воскресенье (пример: 2025-12-14..2025-12-20).
+        # Вычисляем ближайшее прошедшее воскресенье как начало диапазона, чтобы таблица не была пустой.
         weekday = today.weekday()  # Mon=0 ... Sun=6
-        start = today - dt.timedelta(days=weekday + 1 if weekday != 6 else 0)
+        offset = (weekday + 1) % 7  # Sun -> 0, Mon -> 1, Tue -> 2, ...
+        start = today - dt.timedelta(days=offset)
         end = start + dt.timedelta(days=6)
         for group in groups:
             parsed = ScheduleParser.fetch_group_schedule(group, start=start, end=end)

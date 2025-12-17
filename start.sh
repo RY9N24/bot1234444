@@ -7,6 +7,7 @@ VENV_DIR="$SCRIPT_DIR/.venv"
 PYTHON_BIN="$VENV_DIR/bin/python3"
 LOG_DIR="$SCRIPT_DIR/logs"
 LOG_FILE="$LOG_DIR/bot.log"
+ACTION="${1:-start}"
 
 command_exists() {
   command -v "$1" >/dev/null 2>&1
@@ -19,6 +20,35 @@ run_apt() {
     apt-get "$@"
   fi
 }
+
+is_session_running() {
+  screen -list | grep -q "\\.${SESSION_NAME}\\b"
+}
+
+print_status() {
+  if is_session_running; then
+    echo "Screen session '${SESSION_NAME}' is running. Attach with: screen -r ${SESSION_NAME}"
+    if [ -f "$LOG_FILE" ]; then
+      echo "Последние строки лога:"
+      tail -n 20 "$LOG_FILE"
+    fi
+    return 0
+  fi
+
+  echo "Сессия '${SESSION_NAME}' не найдена." >&2
+  if [ -f "$LOG_FILE" ]; then
+    echo "Последние строки лога:"
+    tail -n 50 "$LOG_FILE" || true
+  else
+    echo "Лог-файл отсутствует. Запустите ./start.sh для создания." >&2
+  fi
+  return 1
+}
+
+if [ "$ACTION" = "status" ]; then
+  print_status
+  exit $?
+fi
 
 if [ ! -x "$PYTHON_BIN" ]; then
   echo "Не найден виртуальный интерпретатор $PYTHON_BIN. Сначала выполните ./install.sh" >&2

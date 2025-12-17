@@ -1,8 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 command_exists() {
   command -v "$1" >/dev/null 2>&1
+}
+
+run_apt() {
+  if [ "${EUID:-$(id -u)}" -ne 0 ] && command_exists sudo; then
+    sudo apt-get "$@"
+  else
+    apt-get "$@"
+  fi
 }
 
 ensure_apt_packages() {
@@ -12,9 +22,9 @@ ensure_apt_packages() {
   fi
 
   echo "Updating package index..."
-  apt-get update -y
+  run_apt update -y
   echo "Installing required system packages..."
-  apt-get install -y python3 python3-pip python3-venv
+  run_apt install -y python3 python3-pip python3-venv screen
 }
 
 if ! command_exists python3 || ! command_exists pip3; then
@@ -32,7 +42,8 @@ if ! command_exists pip3; then
   exit 1
 fi
 
+cd "$SCRIPT_DIR"
 python3 -m pip install --upgrade pip
-python3 -m pip install -r requirements.txt
+python3 -m pip install -r "$SCRIPT_DIR/requirements.txt"
 
 echo "All dependencies installed."

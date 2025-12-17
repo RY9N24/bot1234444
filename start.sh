@@ -5,6 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SESSION_NAME="telegram_notification_bot"
 VENV_DIR="$SCRIPT_DIR/.venv"
 PYTHON_BIN="$VENV_DIR/bin/python3"
+LOG_DIR="$SCRIPT_DIR/logs"
+LOG_FILE="$LOG_DIR/bot.log"
 
 command_exists() {
   command -v "$1" >/dev/null 2>&1
@@ -40,5 +42,21 @@ if screen -list | grep -q "\.${SESSION_NAME}\b"; then
 fi
 
 cd "$SCRIPT_DIR"
-screen -dmS "$SESSION_NAME" bash -c "cd '$SCRIPT_DIR' && '$PYTHON_BIN' -m bot.bot_app"
-echo "Bot started in screen session '${SESSION_NAME}'. Detach/attach with: screen -r ${SESSION_NAME}"
+mkdir -p "$LOG_DIR"
+echo "Starting bot in screen session '${SESSION_NAME}'..."
+screen -dmS "$SESSION_NAME" bash -c "cd '$SCRIPT_DIR' && exec '$PYTHON_BIN' -m bot.bot_app >>'$LOG_FILE' 2>&1"
+sleep 1
+
+if screen -list | grep -q "\.${SESSION_NAME}\b"; then
+  echo "Bot started in screen session '${SESSION_NAME}'. Detach/attach with: screen -r ${SESSION_NAME}"
+  echo "Логи: $LOG_FILE"
+else
+  echo "Не удалось запустить сессию screen '${SESSION_NAME}'. Проверяем лог запуска..." >&2
+  if [ -f "$LOG_FILE" ]; then
+    echo "Последние строки лога:" >&2
+    tail -n 50 "$LOG_FILE" >&2 || true
+  else
+    echo "Лог-файл не создан. Проверьте наличие пакета screen и прав на /run/screen." >&2
+  fi
+  exit 1
+fi

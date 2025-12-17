@@ -74,7 +74,8 @@ fi
 cd "$SCRIPT_DIR"
 mkdir -p "$LOG_DIR"
 echo "Starting bot in screen session '${SESSION_NAME}'..."
-screen -dmS "$SESSION_NAME" bash -c "cd '$SCRIPT_DIR' && exec '$PYTHON_BIN' -m bot.bot_app >>'$LOG_FILE' 2>&1"
+# tee сохраняет лог в файл и одновременно выводит в screen, чтобы при screen -x было видно отладку
+screen -dmS "$SESSION_NAME" bash -c "cd '$SCRIPT_DIR' && set -o pipefail && exec '$PYTHON_BIN' -m bot.bot_app 2>&1 | tee -a '$LOG_FILE'"
 sleep 1
 
 if screen -list | grep -q "\.${SESSION_NAME}\b"; then

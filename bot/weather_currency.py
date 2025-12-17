@@ -84,27 +84,40 @@ class WeatherService:
 class CurrencyService:
     @staticmethod
     def fetch_currency() -> str:
-        fx_resp = requests.get(CURRENCY_URL, params={"base": "USD", "symbols": "RUB,CNY"}, timeout=10)
-        fx_resp.raise_for_status()
-        fx_data = fx_resp.json()
-        rates = fx_data.get("rates", {})
-        rub = rates.get("RUB")
-        cny = rates.get("CNY")
+        parts = ["💱 Курсы валют"]
+        try:
+            fx_resp = requests.get(CURRENCY_URL, params={"base": "USD", "symbols": "RUB,CNY"}, timeout=10)
+            fx_resp.raise_for_status()
+            fx_data = fx_resp.json()
+            rates = fx_data.get("rates", {})
+            rub = rates.get("RUB")
+            cny = rates.get("CNY")
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Не удалось получить курсы валют: %s", exc)
+            rub = cny = None
 
-        btc_resp = requests.get(BTC_URL, timeout=10)
-        btc_resp.raise_for_status()
-        btc_data = btc_resp.json()
-        btc_usd = btc_data.get("bpi", {}).get("USD", {}).get("rate")
-        if rub is None or cny is None or not btc_usd:
-            logger.warning("Не удалось получить курсы валют/BTC")
-            return "💱 Курсы временно недоступны."
-        logger.info("Курсы: USD/RUB=%s, USD/CNY=%s, BTC/USD=%s", rub, cny, btc_usd)
-        return (
-            "💱 Курсы валют и BTC:\n"
-            f"• USD → RUB: {rub:.2f}\n"
-            f"• USD → CNY: {cny:.4f}\n"
-            f"• BTC → USD: {btc_usd}"
-        )
+        try:
+            btc_resp = requests.get(BTC_URL, timeout=10)
+            btc_resp.raise_for_status()
+            btc_data = btc_resp.json()
+            btc_usd = btc_data.get("bpi", {}).get("USD", {}).get("rate")
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Не удалось получить курс BTC: %s", exc)
+            btc_usd = None
+
+        if rub is not None:
+            parts.append(f"• USD → RUB: {rub:.2f}")
+        if cny is not None:
+            parts.append(f"• USD → CNY: {cny:.4f}")
+        if btc_usd:
+            parts.append(f"• BTC → USD: {btc_usd}")
+
+        if len(parts) == 1:
+            parts.append("Курсы временно недоступны.")
+        else:
+            logger.info("Курсы: %s", "; ".join(parts[1:]))
+
+        return "\n".join(parts)
 
 
 def utc_now() -> dt.datetime:

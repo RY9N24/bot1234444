@@ -59,7 +59,10 @@ class ScheduleParser:
     def refresh_cache(groups: List[str]) -> Dict[str, Dict[str, List[str]]]:
         cache: Dict[str, Dict[str, List[str]]] = {}
         today = dt.date.today()
-        start = today - dt.timedelta(days=today.weekday())
+        # API страницы отдаёт неделю, которая начинается в воскресенье,
+        # поэтому подстраиваемся под их диапазон (вс- сб), чтобы таблица не была пустой.
+        weekday = today.weekday()  # Mon=0 ... Sun=6
+        start = today - dt.timedelta(days=weekday + 1 if weekday != 6 else 0)
         end = start + dt.timedelta(days=6)
         for group in groups:
             parsed = ScheduleParser.fetch_group_schedule(group, start=start, end=end)

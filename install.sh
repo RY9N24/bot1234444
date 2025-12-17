@@ -2,6 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV_DIR="$SCRIPT_DIR/.venv"
 # Avoid interactive tzdata prompts in non-interactive environments
 export DEBIAN_FRONTEND="${DEBIAN_FRONTEND:-noninteractive}"
 
@@ -45,7 +46,16 @@ if ! command_exists pip3; then
 fi
 
 cd "$SCRIPT_DIR"
-python3 -m pip install --upgrade pip
-python3 -m pip install -r "$SCRIPT_DIR/requirements.txt"
+if [ ! -d "$VENV_DIR" ]; then
+  echo "Creating virtual environment at $VENV_DIR ..."
+  python3 -m venv "$VENV_DIR"
+fi
+
+echo "Activating virtual environment..."
+# shellcheck disable=SC1090
+source "$VENV_DIR/bin/activate"
+
+pip install --upgrade pip
+pip install -r "$SCRIPT_DIR/requirements.txt"
 
 echo "All dependencies installed."

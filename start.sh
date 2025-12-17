@@ -3,6 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SESSION_NAME="telegram_notification_bot"
+VENV_DIR="$SCRIPT_DIR/.venv"
+PYTHON_BIN="$VENV_DIR/bin/python3"
 
 command_exists() {
   command -v "$1" >/dev/null 2>&1
@@ -16,8 +18,8 @@ run_apt() {
   fi
 }
 
-if ! command_exists python3; then
-  echo "python3 не найден. Сначала запустите ./install.sh" >&2
+if [ ! -x "$PYTHON_BIN" ]; then
+  echo "Не найден виртуальный интерпретатор $PYTHON_BIN. Сначала выполните ./install.sh" >&2
   exit 1
 fi
 
@@ -38,5 +40,5 @@ if screen -list | grep -q "\.${SESSION_NAME}\b"; then
 fi
 
 cd "$SCRIPT_DIR"
-screen -dmS "$SESSION_NAME" bash -c "cd '$SCRIPT_DIR' && python3 -m bot.bot_app"
+screen -dmS "$SESSION_NAME" bash -c "cd '$SCRIPT_DIR' && '$PYTHON_BIN' -m bot.bot_app"
 echo "Bot started in screen session '${SESSION_NAME}'. Detach/attach with: screen -r ${SESSION_NAME}"

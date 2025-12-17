@@ -50,6 +50,8 @@ class NotificationBot:
         app.add_handler(CommandHandler("reminder", self.reminder_menu))
         app.add_handler(CommandHandler("help", self.help))
 
+        app.add_handler(CallbackQueryHandler(self.broadcast_now, pattern="^broadcast_now"))
+
         app.add_handler(ConversationHandler(
             entry_points=[CommandHandler("setgroup", self.ask_group)],
             states={
@@ -304,7 +306,25 @@ class NotificationBot:
         await context.bot.send_message(chat_id=user_id, text="Сообщение было сохранено и ожидает отправки")
 
     async def broadcast_settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("Настройте рассылку: /setbroadcast для времени и охвата.")
+        keyboard = [[InlineKeyboardButton("Сообщение сейчас", callback_data="broadcast_now")]]
+        await update.message.reply_text(
+            "Настройте рассылку: /setbroadcast для времени и охвата. Или отправьте сообщение прямо сейчас:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+
+    async def broadcast_now(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
+        profile = data_manager.get_profile(query.from_user.id)
+        if not profile:
+            await query.edit_message_text("Профиль не найден. Выполните /start")
+            return
+        messages = await self._prepare_broadcast_messages(profile)
+        if not messages:
+            await query.edit_message_text("Недостаточно данных для сообщения. Укажите город или группу.")
+            return
+        await query.edit_message_text("Сообщение отправляется...")
+        await context.bot.send_message(chat_id=query.from_user.id, text="\n\n".join(messages))
 
     def _schedule_broadcast_job(self, profile):
         time_str = profile.get("broadcast_time")
@@ -325,6 +345,22 @@ class NotificationBot:
         profile = data_manager.get_profile(user_id)
         if not profile:
             return
+        messages = await self._prepare_broadcast_messages(profile)
+        if not messages:
+            return
+        await context.bot.send_message(chat_id=user_id, text="\n\n".join(messages))
+
+    async def _ensure_schedule_cache(self):
+        now = dt.datetime.now(dt.timezone.utc)
+        if self._last_schedule_refresh and (now - self._last_schedule_refresh).total_seconds() < 3600:
+            return
+        profiles = data_manager.list_profiles()
+        groups = {p.get("group") for p in profiles if p.get("group")}
+        if groups:
+            ScheduleParser.refresh_cache(list(groups))
+            self._last_schedule_refresh = now
+
+    async def _prepare_broadcast_messages(self, profile: dict[str, str | int | None]):
         await self._ensure_schedule_cache()
         messages = []
         geo = None
@@ -339,17 +375,7 @@ class NotificationBot:
         if group:
             schedule = ScheduleParser.load_or_fetch(group)
             messages.append(ScheduleParser.format_schedule(group, schedule, scope))
-        await context.bot.send_message(chat_id=user_id, text="\n\n".join(messages))
-
-    async def _ensure_schedule_cache(self):
-        now = dt.datetime.now(dt.timezone.utc)
-        if self._last_schedule_refresh and (now - self._last_schedule_refresh).total_seconds() < 3600:
-            return
-        profiles = data_manager.list_profiles()
-        groups = {p.get("group") for p in profiles if p.get("group")}
-        if groups:
-            ScheduleParser.refresh_cache(list(groups))
-            self._last_schedule_refresh = now
+        return [m for m in messages if m]
 
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Операция отменена", reply_markup=ReplyKeyboardRemove())

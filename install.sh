@@ -2,6 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Avoid interactive tzdata prompts in non-interactive environments
+export DEBIAN_FRONTEND="${DEBIAN_FRONTEND:-noninteractive}"
 
 command_exists() {
   command -v "$1" >/dev/null 2>&1
@@ -24,7 +26,7 @@ ensure_apt_packages() {
   echo "Updating package index..."
   run_apt update -y
   echo "Installing required system packages..."
-  run_apt install -y python3 python3-pip python3-venv screen
+  run_apt install -y python3 python3-pip python3-venv screen tzdata ca-certificates
 }
 
 if ! command_exists python3 || ! command_exists pip3; then

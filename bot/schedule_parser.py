@@ -61,14 +61,17 @@ class ScheduleParser:
             return f"Расписание для {group} недоступно."
 
         today = dt.date.today()
-        lines = [f"Расписание для группы {group} ({'день' if scope == 'day' else 'неделя'}):"]
+        scope_label = "день" if scope == "day" else "неделя"
+        lines = [f"📚 Расписание — {group} ({scope_label})"]
         for date_label, lessons in schedule.items():
             if scope == "day" and str(today.day) not in date_label and str(today) not in date_label:
-                # naive filter to avoid heavy parsing, the source date format is unknown
                 continue
-            lines.append(f"\n{date_label}:")
-            for lesson in lessons:
-                lines.append(f"- {lesson}")
+            lines.append(f"\n📅 {date_label}")
+            if not lessons:
+                lines.append("• Выходной")
+            else:
+                for idx, lesson in enumerate(lessons, 1):
+                    lines.append(f"{idx}) {lesson}")
             if scope == "day":
                 break
         return "\n".join(lines)

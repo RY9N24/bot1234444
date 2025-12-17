@@ -47,7 +47,26 @@ class WeatherService:
         temperature = current.get("temperature")
         windspeed = current.get("windspeed")
         weathercode = current.get("weathercode")
-        now_descr = f"Температура: {temperature}°C, ветер: {windspeed} м/с, код погоды: {weathercode}"
+        code_map = {
+            0: "ясно",
+            1: "в основном ясно",
+            2: "переменная облачность",
+            3: "пасмурно",
+            45: "туман",
+            48: "изморозь",
+            51: "легкая морось",
+            53: "морось",
+            55: "сильная морось",
+            61: "слабый дождь",
+            63: "дождь",
+            65: "сильный дождь",
+            71: "слабый снег",
+            73: "снег",
+            75: "сильный снег",
+            95: "гроза",
+        }
+        code_text = code_map.get(weathercode, "погода уточняется")
+        now_descr = f"🌡 {temperature}°C • 🌬 {windspeed} м/с • {code_text}"
 
         today_summary = "Нет данных"
         if "temperature_2m" in hourly:
@@ -70,8 +89,14 @@ class CurrencyService:
         btc_resp.raise_for_status()
         btc_data = btc_resp.json()
         btc_usd = btc_data.get("bpi", {}).get("USD", {}).get("rate")
-
-        return f"USD/RUB: {rub:.2f}\nUSD/CNY: {cny:.4f}\nBTC/USD: {btc_usd}"
+        if rub is None or cny is None or not btc_usd:
+            return "💱 Курсы временно недоступны."
+        return (
+            "💱 Курсы валют и BTC:\n"
+            f"• USD → RUB: {rub:.2f}\n"
+            f"• USD → CNY: {cny:.4f}\n"
+            f"• BTC → USD: {btc_usd}"
+        )
 
 
 def utc_now() -> dt.datetime:

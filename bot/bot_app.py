@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from telegram import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    ReplyKeyboardRemove,
+    ReplyKeyboardMarkup,
     Update,
 )
 from telegram.ext import (
@@ -46,6 +46,7 @@ class NotificationBot:
     def _register_handlers(self):
         app = self.application
         app.add_handler(CommandHandler("start", self.start))
+        app.add_handler(CommandHandler("menu", self.start))
         app.add_handler(CommandHandler("profile", self.profile))
         app.add_handler(CommandHandler("broadcast", self.broadcast_settings))
         app.add_handler(CommandHandler("reminder", self.reminder_menu))
@@ -54,7 +55,10 @@ class NotificationBot:
         app.add_handler(CallbackQueryHandler(self.broadcast_now, pattern="^broadcast_now"))
 
         app.add_handler(ConversationHandler(
-            entry_points=[CommandHandler("setgroup", self.ask_group)],
+            entry_points=[
+                CommandHandler("setgroup", self.ask_group),
+                MessageHandler(filters.Regex("^👥 Выбрать группу$"), self.ask_group),
+            ],
             states={
                 GROUP_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.save_group)],
             },
@@ -62,7 +66,10 @@ class NotificationBot:
         ))
 
         app.add_handler(ConversationHandler(
-            entry_points=[CommandHandler("setcity", self.ask_city)],
+            entry_points=[
+                CommandHandler("setcity", self.ask_city),
+                MessageHandler(filters.Regex("^📍 Выбрать город$"), self.ask_city),
+            ],
             states={
                 CITY_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.save_city)],
             },
@@ -70,7 +77,10 @@ class NotificationBot:
         ))
 
         app.add_handler(ConversationHandler(
-            entry_points=[CommandHandler("setbroadcast", self.ask_broadcast_time)],
+            entry_points=[
+                CommandHandler("setbroadcast", self.ask_broadcast_time),
+                MessageHandler(filters.Regex("^⏰ Время рассылки$"), self.ask_broadcast_time),
+            ],
             states={
                 BROADCAST_TIME_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.save_broadcast_time)],
                 BROADCAST_SCOPE_STATE: [CallbackQueryHandler(self.save_broadcast_scope)],
@@ -79,7 +89,10 @@ class NotificationBot:
         ))
 
         app.add_handler(ConversationHandler(
-            entry_points=[CommandHandler("new_reminder", self.reminder_text)],
+            entry_points=[
+                CommandHandler("new_reminder", self.reminder_text),
+                MessageHandler(filters.Regex("^🔔 Напоминание$"), self.reminder_text),
+            ],
             states={
                 REM_TEXT_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.reminder_pick_date)],
                 REM_DATE_STATE: [CallbackQueryHandler(self.reminder_pick_time)],
@@ -89,6 +102,19 @@ class NotificationBot:
         ))
 
         app.add_handler(CallbackQueryHandler(self.handle_reminder_action, pattern="^reminder_action"))
+        app.add_handler(MessageHandler(filters.Regex("^🚀 Сообщение сейчас$"), self.broadcast_now_message))
+        app.add_handler(MessageHandler(filters.Regex("^ℹ️ Профиль$"), self.profile))
+
+    @staticmethod
+    def _main_menu():
+        return ReplyKeyboardMarkup(
+            [
+                ["📍 Выбрать город", "👥 Выбрать группу"],
+                ["⏰ Время рассылки", "🚀 Сообщение сейчас"],
+                ["🔔 Напоминание", "ℹ️ Профиль"],
+            ],
+            resize_keyboard=True,
+        )
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
@@ -103,12 +129,22 @@ class NotificationBot:
             "broadcast_scope": "day",
         }
         data_manager.upsert_profile(profile)
-        await update.message.reply_text(
-            "Добро пожаловать! Используйте /setcity для выбора города, /setgroup для группы, /setbroadcast для времени рассылки, /reminder для напоминаний."
+        text = (
+            "👋 Добро пожаловать! Все основные действия доступны на кнопках ниже.\n\n"
+            "• 📍 Город — выбрать город и часовой пояс\n"
+            "• 👥 Группа — указать учебную группу\n"
+            "• ⏰ Время рассылки — настроить ежедневное сообщение\n"
+            "• 🔔 Напоминание — создать или просмотреть личные напоминания\n"
+            "• 🚀 Сообщение сейчас — получить итоговое сообщение в любой момент\n"
+            "• ℹ️ Профиль — увидеть текущие настройки"
         )
+        await update.message.reply_text(text, reply_markup=self._main_menu())
 
     async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("Доступные команды: /profile /setcity /setgroup /setbroadcast /reminder")
+        await update.message.reply_text(
+            "Доступные команды: /profile /setcity /setgroup /setbroadcast /reminder /menu",
+            reply_markup=self._main_menu(),
+        )
 
     async def profile(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         profile = data_manager.get_profile(update.effective_user.id)
@@ -116,46 +152,71 @@ class NotificationBot:
             await update.message.reply_text("Профиль не найден. Выполните /start")
             return
         text = (
-            f"ID: {profile['user_id']}\n@{profile.get('username')}\nГород: {profile.get('city')}\n"
-            f"Часовой пояс: {profile.get('timezone')}\nГруппа: {profile.get('group')}\n"
+            "ℹ️ Профиль\n"
+            f"ID: {profile['user_id']}\n"
+            f"Ник: @{profile.get('username')}\n"
+            f"Город: {profile.get('city')}\n"
+            f"Часовой пояс: {profile.get('timezone')}\n"
+            f"Группа: {profile.get('group')}\n"
             f"Время рассылки: {profile.get('broadcast_time')} ({profile.get('broadcast_scope')})"
         )
-        await update.message.reply_text(text)
+        await update.message.reply_text(text, reply_markup=self._main_menu())
 
     async def ask_group(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("Введите вашу группу (например, БРБ24):")
+        await update.message.reply_text(
+            "👥 Укажите вашу группу (например, БРБ24). Я сверю её с официальным списком.",
+            reply_markup=self._main_menu(),
+        )
         return GROUP_STATE
 
     async def save_group(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         group_raw = update.message.text.strip().lower()
         canonical = CANONICAL_GROUPS.get(group_raw)
         if not canonical:
-            await update.message.reply_text("Группа указана неверно. Проверьте список доступных и попробуйте снова. /setgroup")
+            await update.message.reply_text(
+                "⚠️ Группа не найдена. Попробуйте снова или проверьте регистр — я принимаю БРБ24/брб24 и другие варианты.",
+                reply_markup=self._main_menu(),
+            )
             return ConversationHandler.END
         profile = data_manager.get_profile(update.effective_user.id) or {"user_id": update.effective_user.id, "username": update.effective_user.username}
         profile.update({"group": canonical})
         data_manager.upsert_profile(profile)
-        await update.message.reply_text(f"Группа сохранена: {canonical}")
+        await update.message.reply_text(
+            f"✅ Группа сохранена: {canonical}",
+            reply_markup=self._main_menu(),
+        )
         return ConversationHandler.END
 
     async def ask_city(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("Укажите город проживания:")
+        await update.message.reply_text(
+            "📍 Напишите город проживания — я подберу часовой пояс автоматически.",
+            reply_markup=self._main_menu(),
+        )
         return CITY_STATE
 
     async def save_city(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         city = update.message.text.strip()
         geo = WeatherService.geocode(city)
         if not geo:
-            await update.message.reply_text("Город не найден, попробуйте ещё раз.")
+            await update.message.reply_text(
+                "⚠️ Город не найден, попробуйте ещё раз. Убедитесь, что указали корректное название.",
+                reply_markup=self._main_menu(),
+            )
             return ConversationHandler.END
         profile = data_manager.get_profile(update.effective_user.id) or {"user_id": update.effective_user.id, "username": update.effective_user.username}
         profile.update({"city": geo.city, "timezone": geo.timezone})
         data_manager.upsert_profile(profile)
-        await update.message.reply_text(f"Город сохранён: {geo.city} (часовой пояс {geo.timezone})")
+        await update.message.reply_text(
+            f"✅ Город сохранён: {geo.city}\n🕑 Часовой пояс: {geo.timezone}",
+            reply_markup=self._main_menu(),
+        )
         return ConversationHandler.END
 
     async def ask_broadcast_time(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("Введите время рассылки в формате ЧЧ:ММ")
+        await update.message.reply_text(
+            "⏰ Укажите время рассылки в формате ЧЧ:ММ (ваш часовой пояс).",
+            reply_markup=self._main_menu(),
+        )
         return BROADCAST_TIME_STATE
 
     async def save_broadcast_time(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -163,7 +224,10 @@ class NotificationBot:
         try:
             dt.time.fromisoformat(time_str)
         except ValueError:
-            await update.message.reply_text("Неверный формат времени. Попробуйте снова.")
+            await update.message.reply_text(
+                "⚠️ Неверный формат времени. Используйте ЧЧ:ММ, например 08:30.",
+                reply_markup=self._main_menu(),
+            )
             return BROADCAST_TIME_STATE
         context.user_data["broadcast_time"] = time_str
         keyboard = [[InlineKeyboardButton("День", callback_data="scope_day"), InlineKeyboardButton("Неделя", callback_data="scope_week")]]
@@ -181,17 +245,18 @@ class NotificationBot:
         profile = data_manager.get_profile(query.from_user.id) or {"user_id": query.from_user.id, "username": query.from_user.username}
         profile.update({"broadcast_time": time_str, "broadcast_scope": scope})
         data_manager.upsert_profile(profile)
-        await query.edit_message_text(f"Время рассылки сохранено: {time_str}, охват: {scope}")
+        scope_label = "день" if scope == "day" else "неделя"
+        await query.edit_message_text(f"✅ Время рассылки: {time_str}\n📅 Охват: {scope_label}")
         self._schedule_broadcast_job(profile)
         return ConversationHandler.END
 
     async def reminder_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         reminders = ReminderService.list_for_user(update.effective_user.id)
-        lines = ["Ваши напоминания:"]
+        lines = ["🔔 Ваши напоминания:"]
         for r in reminders:
-            lines.append(f"- {r['message']} (отправка {r['send_at_local']})")
+            lines.append(f"• {r['message']} — {r['send_at_local']}")
         if len(lines) == 1:
-            lines.append("Нет активных напоминаний.")
+            lines.append("Пока нет активных напоминаний.")
         keyboard = [[InlineKeyboardButton("Создать напоминание", callback_data="reminder_action_new")]]
         await update.message.reply_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -199,13 +264,13 @@ class NotificationBot:
         query = update.callback_query
         await query.answer()
         if query.data.endswith("new"):
-            await query.edit_message_text("Напишите сообщение которое хотите увидеть позже:")
+            await query.edit_message_text("Напишите сообщение, которое хотите увидеть позже:")
             context.user_data["from_button"] = True
             return REM_TEXT_STATE
         return ConversationHandler.END
 
     async def reminder_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("Напишите сообщение которое хотите увидеть позже:")
+        await update.message.reply_text("Напишите сообщение, которое хотите увидеть позже:")
         return REM_TEXT_STATE
 
     async def reminder_pick_date(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -215,7 +280,7 @@ class NotificationBot:
         for i in range(14):
             target = today + dt.timedelta(days=i)
             buttons.append([InlineKeyboardButton(target.strftime("%d.%m.%Y"), callback_data=f"date_{target.isoformat()}")])
-        await update.message.reply_text("Выберите день:", reply_markup=InlineKeyboardMarkup(buttons))
+        await update.message.reply_text("📅 Выберите день для напоминания:", reply_markup=InlineKeyboardMarkup(buttons))
         return REM_DATE_STATE
 
     async def reminder_pick_time(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -237,7 +302,7 @@ class NotificationBot:
             [InlineKeyboardButton("Указать вручную", callback_data=f"time_manual_{date_iso}")],
         ]
         await query.edit_message_text(
-            f"Текущее время по серверу {time_label}. Выберите корректировки или укажите вручную.",
+            f"⏱ Сейчас (по серверу): {time_label}\nВыберите корректировку или укажите вручную.",
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
         context.user_data["rem_time"] = time_label
@@ -305,12 +370,12 @@ class NotificationBot:
             name=f"reminder-{entry['id']}",
             data={"user_id": user_id, "message": text},
         )
-        await context.bot.send_message(chat_id=user_id, text="Сообщение было сохранено и ожидает отправки")
+        await context.bot.send_message(chat_id=user_id, text="✅ Сообщение сохранено и ожидает отправки")
 
     async def broadcast_settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[InlineKeyboardButton("Сообщение сейчас", callback_data="broadcast_now")]]
         await update.message.reply_text(
-            "Настройте рассылку: /setbroadcast для времени и охвата. Или отправьте сообщение прямо сейчас:",
+            "🚀 Быстрый доступ:\n• Установите время рассылки через кнопку ниже.\n• Или запросите сообщение прямо сейчас.",
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
 
@@ -327,6 +392,20 @@ class NotificationBot:
             return
         await query.edit_message_text("Сообщение отправляется...")
         await context.bot.send_message(chat_id=query.from_user.id, text="\n\n".join(messages))
+
+    async def broadcast_now_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        profile = data_manager.get_profile(update.effective_user.id)
+        if not profile:
+            await update.message.reply_text("Профиль не найден. Выполните /start", reply_markup=self._main_menu())
+            return
+        messages = await self._prepare_broadcast_messages(profile)
+        if not messages:
+            await update.message.reply_text(
+                "Недостаточно данных для сообщения. Укажите город или группу.",
+                reply_markup=self._main_menu(),
+            )
+            return
+        await update.message.reply_text("\n\n".join(messages), reply_markup=self._main_menu())
 
     def _schedule_broadcast_job(self, profile):
         time_str = profile.get("broadcast_time")
@@ -370,7 +449,15 @@ class NotificationBot:
             geo = WeatherService.geocode(profile["city"])
             if geo:
                 now_descr, today_summary = WeatherService.fetch_weather(geo)
-                messages.append(f"Погода сейчас: {now_descr}\nПрогноз: {today_summary}")
+                messages.append(
+                    "\n".join(
+                        [
+                            f"🌦 Погода — {geo.city}",
+                            now_descr,
+                            f"📈 {today_summary}",
+                        ]
+                    )
+                )
         messages.append(CurrencyService.fetch_currency())
         group = profile.get("group")
         scope = profile.get("broadcast_scope", "day")
@@ -380,7 +467,7 @@ class NotificationBot:
         return [m for m in messages if m]
 
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text("Операция отменена", reply_markup=ReplyKeyboardRemove())
+        await update.message.reply_text("Операция отменена", reply_markup=self._main_menu())
         return ConversationHandler.END
 
     async def _post_init(self, app: Application):

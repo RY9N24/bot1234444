@@ -48,35 +48,42 @@ class ReminderService:
         return local_dt.astimezone(dt.timezone.utc)
 
     @staticmethod
-    def purge_and_reschedule(job_queue, bot):
+    async def purge_and_reschedule(job_queue, bot):
         now = utc_now()
         overdue = ReminderService.due_reminders(now)
         if overdue:
             ReminderService.remove([r["id"] for r in overdue])
         for rem in overdue:
-            bot.send_message(
+            await bot.send_message(
                 chat_id=rem["user_id"],
                 text=f"{rem['message']}\n\nСообщение отправлено с задержкой по техническим причинам.",
             )
 
     @staticmethod
-    def schedule_all(job_queue, bot):
+    async def schedule_all(job_queue, bot):
         reminders = load_reminders()
         now = utc_now()
         overdue_ids: List[str] = []
+
         for rem in reminders:
             send_at = parser.isoparse(rem["send_at_utc"])
             if send_at <= now:
                 overdue_ids.append(rem["id"])
-                bot.send_message(
+                await bot.send_message(
                     chat_id=rem["user_id"],
                     text=f"{rem['message']}\n\nСообщение отправлено с задержкой по техническим причинам.",
                 )
             else:
                 job_queue.run_once(
-                    lambda ctx: bot.send_message(chat_id=rem["user_id"], text=rem["message"]),
+                    ReminderService._send_job,
                     when=send_at,
                     name=f"reminder-{rem['id']}",
+                    data={"user_id": rem["user_id"], "message": rem["message"]},
                 )
+
         if overdue_ids:
             ReminderService.remove(overdue_ids)
+
+    @staticmethod
+    async def _send_job(ctx):
+        await ctx.bot.send_message(chat_id=ctx.job.data["user_id"], text=ctx.job.data["message"])

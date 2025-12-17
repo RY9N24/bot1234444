@@ -37,6 +37,7 @@ class NotificationBot:
             .token(token)
             .rate_limiter(AIORateLimiter())
             .concurrent_updates(True)
+            .post_init(self._post_init)
             .build()
         )
         self._last_schedule_refresh: dt.datetime | None = None
@@ -299,9 +300,10 @@ class NotificationBot:
         }
         ReminderService.add_reminder(entry)
         context.job_queue.run_once(
-            lambda ctx: context.bot.send_message(chat_id=user_id, text=text),
+            ReminderService._send_job,
             when=send_at_utc,
             name=f"reminder-{entry['id']}",
+            data={"user_id": user_id, "message": text},
         )
         await context.bot.send_message(chat_id=user_id, text="Сообщение было сохранено и ожидает отправки")
 
@@ -381,15 +383,17 @@ class NotificationBot:
         await update.message.reply_text("Операция отменена", reply_markup=ReplyKeyboardRemove())
         return ConversationHandler.END
 
-    def load_jobs(self):
+    async def _post_init(self, app: Application):
+        await self.load_jobs()
+
+    async def load_jobs(self):
         # schedule overdue reminders and broadcasts
         for profile in data_manager.list_profiles():
             if profile.get("broadcast_time") and profile.get("timezone"):
                 self._schedule_broadcast_job(profile)
-        ReminderService.schedule_all(self.application.job_queue, self.application.bot)
+        await ReminderService.schedule_all(self.application.job_queue, self.application.bot)
 
     def run(self):
-        self.load_jobs()
         self.application.run_polling()
 
 

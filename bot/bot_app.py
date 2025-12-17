@@ -4,12 +4,8 @@ import logging
 import uuid
 from zoneinfo import ZoneInfo
 
-from telegram import (
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    ReplyKeyboardMarkup,
-    Update,
-)
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, Update
+from telegram.error import Conflict
 from telegram.ext import (
     AIORateLimiter,
     Application,
@@ -58,6 +54,7 @@ class NotificationBot:
         app.add_handler(CommandHandler("broadcast", self.broadcast_settings))
         app.add_handler(CommandHandler("reminder", self.reminder_menu))
         app.add_handler(CommandHandler("help", self.help))
+        app.add_error_handler(self.handle_error)
 
         app.add_handler(CallbackQueryHandler(self.broadcast_now, pattern="^broadcast_now"))
         app.add_handler(CallbackQueryHandler(self.handle_profile_action, pattern="^(profile_toggle_scope|del_time_|noop)"))
@@ -65,33 +62,28 @@ class NotificationBot:
         app.add_handler(ConversationHandler(
             entry_points=[
                 CommandHandler("setgroup", self.ask_group),
-                MessageHandler(filters.Regex("^👥 Выбрать группу$"), self.ask_group),
                 CallbackQueryHandler(self.ask_group, pattern="^profile_set_group$"),
             ],
             states={
                 GROUP_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.save_group)],
             },
             fallbacks=[CommandHandler("cancel", self.cancel)],
-            per_message=True,
         ))
 
         app.add_handler(ConversationHandler(
             entry_points=[
                 CommandHandler("setcity", self.ask_city),
-                MessageHandler(filters.Regex("^📍 Выбрать город$"), self.ask_city),
                 CallbackQueryHandler(self.ask_city, pattern="^profile_set_city$"),
             ],
             states={
                 CITY_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.save_city)],
             },
             fallbacks=[CommandHandler("cancel", self.cancel)],
-            per_message=True,
         ))
 
         app.add_handler(ConversationHandler(
             entry_points=[
                 CommandHandler("setbroadcast", self.ask_broadcast_time),
-                MessageHandler(filters.Regex("^➕ Добавить время$"), self.ask_broadcast_time),
                 CallbackQueryHandler(self.ask_broadcast_time, pattern="^profile_add_time$"),
             ],
             states={
@@ -99,7 +91,6 @@ class NotificationBot:
                 BROADCAST_SCOPE_STATE: [CallbackQueryHandler(self.save_broadcast_scope)],
             },
             fallbacks=[CommandHandler("cancel", self.cancel)],
-            per_message=True,
         ))
 
         app.add_handler(ConversationHandler(
@@ -113,7 +104,6 @@ class NotificationBot:
                 REM_TIME_STATE: [CallbackQueryHandler(self.reminder_adjust_time), MessageHandler(filters.TEXT & ~filters.COMMAND, self.reminder_manual_time)],
             },
             fallbacks=[CommandHandler("cancel", self.cancel)],
-            per_message=True,
         ))
 
         app.add_handler(CallbackQueryHandler(self.handle_reminder_action, pattern="^reminder_action"))
@@ -198,7 +188,11 @@ class NotificationBot:
 
     async def help(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
-            "Доступные команды: /profile /setcity /setgroup /setbroadcast /reminder /menu",
+            "Используйте кнопки меню ниже. Основные действия:\n"
+            "• ℹ️ Профиль — статусы города, группы и времени рассылок\n"
+            "• 🚀 Сообщение сейчас — получить рассылку сразу\n"
+            "• 🔔 Новое напоминание — создать личное уведомление\n"
+            "• 📅 Мои напоминания — посмотреть и отредактировать",
             reply_markup=self._main_menu(),
         )
 
@@ -654,6 +648,16 @@ class NotificationBot:
                 logger.exception("Ошибка расписания для id=%s группа=%s: %s", profile.get("user_id"), group, exc)
         return [m for m in messages if m]
 
+    async def handle_error(self, update: object, context: ContextTypes.DEFAULT_TYPE):
+        err = context.error
+        if isinstance(err, Conflict):
+            logger.error(
+                "Обнаружен второй запущенный экземпляр бота (409 Conflict от getUpdates). Завершение текущего процесса."
+            )
+            await self.application.stop()
+            return
+        logger.exception("Необработанная ошибка: %s", err)
+
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Операция отменена", reply_markup=self._main_menu())
         return ConversationHandler.END
@@ -671,7 +675,7 @@ class NotificationBot:
 
     def run(self):
         logger.info("Запуск polling бота")
-        self.application.run_polling()
+        self.application.run_polling(drop_pending_updates=True)
 
 
 def build_app(token: str) -> NotificationBot:

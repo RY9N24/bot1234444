@@ -1,7 +1,10 @@
 import datetime as dt
+import logging
 from typing import Optional, Tuple
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 
 class GeoInfo:
@@ -25,8 +28,10 @@ class WeatherService:
         resp.raise_for_status()
         data = resp.json()
         if not data.get("results"):
+            logger.warning("Город '%s' не найден при геокодировании", city)
             return None
         first = data["results"][0]
+        logger.info("Геокодирован город '%s' -> %s (%s)", city, first.get("name", city), first.get("timezone"))
         return GeoInfo(city=first.get("name", city), latitude=first["latitude"], longitude=first["longitude"], timezone=first["timezone"])
 
     @staticmethod
@@ -67,6 +72,7 @@ class WeatherService:
         }
         code_text = code_map.get(weathercode, "погода уточняется")
         now_descr = f"🌡 {temperature}°C • 🌬 {windspeed} м/с • {code_text}"
+        logger.info("Получена погода для %s: %s", geo.city, now_descr)
 
         today_summary = "Нет данных"
         if "temperature_2m" in hourly:
@@ -90,7 +96,9 @@ class CurrencyService:
         btc_data = btc_resp.json()
         btc_usd = btc_data.get("bpi", {}).get("USD", {}).get("rate")
         if rub is None or cny is None or not btc_usd:
+            logger.warning("Не удалось получить курсы валют/BTC")
             return "💱 Курсы временно недоступны."
+        logger.info("Курсы: USD/RUB=%s, USD/CNY=%s, BTC/USD=%s", rub, cny, btc_usd)
         return (
             "💱 Курсы валют и BTC:\n"
             f"• USD → RUB: {rub:.2f}\n"

@@ -1,4 +1,5 @@
 import datetime as dt
+import logging
 from typing import Dict, List, Optional
 
 import pytz
@@ -8,12 +9,16 @@ from .data_manager import load_reminders, save_reminders
 from .weather_currency import utc_now
 
 
+logger = logging.getLogger(__name__)
+
+
 class ReminderService:
     @staticmethod
     def add_reminder(entry: Dict):
         reminders = load_reminders()
         reminders.append(entry)
         save_reminders(reminders)
+        logger.info("Сохранено напоминание id=%s для пользователя=%s", entry.get("id"), entry.get("user_id"))
 
     @staticmethod
     def replace_reminders(reminders: List[Dict]):
@@ -58,6 +63,8 @@ class ReminderService:
                 chat_id=rem["user_id"],
                 text=f"{rem['message']}\n\nСообщение отправлено с задержкой по техническим причинам.",
             )
+        if overdue:
+            logger.info("Отправлено просроченных напоминаний: %s", len(overdue))
 
     @staticmethod
     async def schedule_all(job_queue, bot):
@@ -73,6 +80,7 @@ class ReminderService:
                     chat_id=rem["user_id"],
                     text=f"{rem['message']}\n\nСообщение отправлено с задержкой по техническим причинам.",
                 )
+                logger.info("Просроченное напоминание отправлено id=%s", rem["id"])
             else:
                 job_queue.run_once(
                     ReminderService._send_job,
@@ -80,10 +88,13 @@ class ReminderService:
                     name=f"reminder-{rem['id']}",
                     data={"user_id": rem["user_id"], "message": rem["message"]},
                 )
+                logger.info("Напоминание %s запланировано на %s", rem["id"], send_at.isoformat())
 
         if overdue_ids:
             ReminderService.remove(overdue_ids)
+            logger.info("Удалены просроченные напоминания: %s", ", ".join(overdue_ids))
 
     @staticmethod
     async def _send_job(ctx):
         await ctx.bot.send_message(chat_id=ctx.job.data["user_id"], text=ctx.job.data["message"])
+        logger.info("Отправлено напоминание job=%s пользователю=%s", ctx.job.name, ctx.job.data.get("user_id"))

@@ -1,10 +1,13 @@
 import datetime as dt
+import logging
 from typing import Dict, List, Optional
 
 import requests
 from bs4 import BeautifulSoup
 
 from .data_manager import save_schedule_cache
+
+logger = logging.getLogger(__name__)
 
 SEARCH_URL = "https://lk.tolgas.ru/public-schedule/search/"
 
@@ -17,12 +20,18 @@ class ScheduleParser:
 
         Returns mapping of date string -> list of lessons.
         """
-        resp = requests.get(SEARCH_URL, params={"group": group}, timeout=10)
-        if resp.status_code != 200:
+        try:
+            resp = requests.get(SEARCH_URL, params={"group": group}, timeout=10)
+            if resp.status_code != 200:
+                logger.warning("Не удалось получить расписание для %s: %s", group, resp.status_code)
+                return None
+            soup = BeautifulSoup(resp.text, "html.parser")
+        except Exception as exc:  # pragma: no cover
+            logger.exception("Ошибка при загрузке расписания для %s: %s", group, exc)
             return None
-        soup = BeautifulSoup(resp.text, "html.parser")
         table = soup.find("table")
         if not table:
+            logger.warning("Ответ без таблицы расписания для %s", group)
             return None
 
         schedule: Dict[str, List[str]] = {}
@@ -33,6 +42,8 @@ class ScheduleParser:
             date_label = cols[0]
             lessons = cols[1:]
             schedule.setdefault(date_label, []).extend(lessons)
+        if schedule:
+            logger.info("Спарсили %s дней расписания для %s", len(schedule), group)
         return schedule if schedule else None
 
     @staticmethod
@@ -42,6 +53,7 @@ class ScheduleParser:
             parsed = ScheduleParser.fetch_group_schedule(group)
             if parsed:
                 cache[group] = parsed
+        logger.info("Кеш расписаний обновлён для %s групп", len(cache))
         save_schedule_cache(cache)
         return cache
 

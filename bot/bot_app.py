@@ -1,5 +1,6 @@
 import asyncio
 import datetime as dt
+import logging
 import uuid
 from zoneinfo import ZoneInfo
 
@@ -28,6 +29,12 @@ from .schedule_parser import ScheduleParser
 from .weather_currency import CurrencyService, WeatherService
 
 GROUP_STATE, CITY_STATE, BROADCAST_TIME_STATE, BROADCAST_SCOPE_STATE, REM_TEXT_STATE, REM_DATE_STATE, REM_TIME_STATE = range(7)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 
 class NotificationBot:
@@ -119,6 +126,7 @@ class NotificationBot:
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
         data_manager.add_user(user.id)
+        logger.info("/start from id=%s username=@%s", user.id, user.username)
         profile = data_manager.get_profile(user.id) or {
             "user_id": user.id,
             "username": user.username,
@@ -151,6 +159,7 @@ class NotificationBot:
         if not profile:
             await update.message.reply_text("Профиль не найден. Выполните /start")
             return
+        logger.info("Показ профиля для id=%s", update.effective_user.id)
         text = (
             "ℹ️ Профиль\n"
             f"ID: {profile['user_id']}\n"
@@ -173,6 +182,7 @@ class NotificationBot:
         group_raw = update.message.text.strip().lower()
         canonical = CANONICAL_GROUPS.get(group_raw)
         if not canonical:
+            logger.warning("Неверная группа '%s' от id=%s", group_raw, update.effective_user.id)
             await update.message.reply_text(
                 "⚠️ Группа не найдена. Попробуйте снова или проверьте регистр — я принимаю БРБ24/брб24 и другие варианты.",
                 reply_markup=self._main_menu(),
@@ -181,6 +191,7 @@ class NotificationBot:
         profile = data_manager.get_profile(update.effective_user.id) or {"user_id": update.effective_user.id, "username": update.effective_user.username}
         profile.update({"group": canonical})
         data_manager.upsert_profile(profile)
+        logger.info("Сохранена группа %s для id=%s", canonical, update.effective_user.id)
         await update.message.reply_text(
             f"✅ Группа сохранена: {canonical}",
             reply_markup=self._main_menu(),
@@ -196,7 +207,11 @@ class NotificationBot:
 
     async def save_city(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         city = update.message.text.strip()
-        geo = WeatherService.geocode(city)
+        geo = None
+        try:
+            geo = WeatherService.geocode(city)
+        except Exception as exc:  # pragma: no cover - network/runtime safety
+            logger.exception("Ошибка геокодирования города '%s' для id=%s: %s", city, update.effective_user.id, exc)
         if not geo:
             await update.message.reply_text(
                 "⚠️ Город не найден, попробуйте ещё раз. Убедитесь, что указали корректное название.",
@@ -206,6 +221,7 @@ class NotificationBot:
         profile = data_manager.get_profile(update.effective_user.id) or {"user_id": update.effective_user.id, "username": update.effective_user.username}
         profile.update({"city": geo.city, "timezone": geo.timezone})
         data_manager.upsert_profile(profile)
+        logger.info("Сохранён город %s (%s) для id=%s", geo.city, geo.timezone, update.effective_user.id)
         await update.message.reply_text(
             f"✅ Город сохранён: {geo.city}\n🕑 Часовой пояс: {geo.timezone}",
             reply_markup=self._main_menu(),
@@ -248,6 +264,12 @@ class NotificationBot:
         scope_label = "день" if scope == "day" else "неделя"
         await query.edit_message_text(f"✅ Время рассылки: {time_str}\n📅 Охват: {scope_label}")
         self._schedule_broadcast_job(profile)
+        logger.info(
+            "Настроена рассылка id=%s на %s (%s)",
+            query.from_user.id,
+            time_str,
+            scope,
+        )
         return ConversationHandler.END
 
     async def reminder_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -258,6 +280,7 @@ class NotificationBot:
         if len(lines) == 1:
             lines.append("Пока нет активных напоминаний.")
         keyboard = [[InlineKeyboardButton("Создать напоминание", callback_data="reminder_action_new")]]
+        logger.info("Запрошен список напоминаний id=%s (кол-во=%s)", update.effective_user.id, len(reminders))
         await update.message.reply_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(keyboard))
 
     async def handle_reminder_action(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -271,6 +294,7 @@ class NotificationBot:
 
     async def reminder_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Напишите сообщение, которое хотите увидеть позже:")
+        logger.info("Начато создание напоминания id=%s", update.effective_user.id)
         return REM_TEXT_STATE
 
     async def reminder_pick_date(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -371,6 +395,13 @@ class NotificationBot:
             data={"user_id": user_id, "message": text},
         )
         await context.bot.send_message(chat_id=user_id, text="✅ Сообщение сохранено и ожидает отправки")
+        logger.info(
+            "Создано напоминание id=%s для пользователя=%s на %s (локальное %s)",
+            entry["id"],
+            user_id,
+            send_at_utc.isoformat(),
+            local_str,
+        )
 
     async def broadcast_settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[InlineKeyboardButton("Сообщение сейчас", callback_data="broadcast_now")]]
@@ -392,6 +423,7 @@ class NotificationBot:
             return
         await query.edit_message_text("Сообщение отправляется...")
         await context.bot.send_message(chat_id=query.from_user.id, text="\n\n".join(messages))
+        logger.info("Мгновенная отправка готова id=%s — %s блок(ов)", query.from_user.id, len(messages))
 
     async def broadcast_now_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         profile = data_manager.get_profile(update.effective_user.id)
@@ -406,6 +438,7 @@ class NotificationBot:
             )
             return
         await update.message.reply_text("\n\n".join(messages), reply_markup=self._main_menu())
+        logger.info("Запрошена отправка сейчас через кнопку. id=%s блоков=%s", update.effective_user.id, len(messages))
 
     def _schedule_broadcast_job(self, profile):
         time_str = profile.get("broadcast_time")
@@ -420,6 +453,7 @@ class NotificationBot:
             name=f"broadcast-{profile['user_id']}",
             data={"user_id": profile["user_id"]},
         )
+        logger.info("Поставлена ежедневная рассылка для id=%s на %02d:%02d %s", profile["user_id"], hour, minute, tz_name)
 
     async def _broadcast_job(self, context: ContextTypes.DEFAULT_TYPE):
         user_id = context.job.data["user_id"]
@@ -430,6 +464,7 @@ class NotificationBot:
         if not messages:
             return
         await context.bot.send_message(chat_id=user_id, text="\n\n".join(messages))
+        logger.info("Отправлена плановая рассылка id=%s (%s блоков)", user_id, len(messages))
 
     async def _ensure_schedule_cache(self):
         now = dt.datetime.now(dt.timezone.utc)
@@ -438,6 +473,7 @@ class NotificationBot:
         profiles = data_manager.list_profiles()
         groups = {p.get("group") for p in profiles if p.get("group")}
         if groups:
+            logger.info("Обновление кеша расписания для групп: %s", ", ".join(sorted(groups)))
             ScheduleParser.refresh_cache(list(groups))
             self._last_schedule_refresh = now
 
@@ -446,24 +482,33 @@ class NotificationBot:
         messages = []
         geo = None
         if profile.get("city"):
-            geo = WeatherService.geocode(profile["city"])
-            if geo:
-                now_descr, today_summary = WeatherService.fetch_weather(geo)
-                messages.append(
-                    "\n".join(
-                        [
-                            f"🌦 Погода — {geo.city}",
-                            now_descr,
-                            f"📈 {today_summary}",
-                        ]
+            try:
+                geo = WeatherService.geocode(profile["city"])
+                if geo:
+                    now_descr, today_summary = WeatherService.fetch_weather(geo)
+                    messages.append(
+                        "\n".join(
+                            [
+                                f"🌦 Погода — {geo.city}",
+                                now_descr,
+                                f"📈 {today_summary}",
+                            ]
+                        )
                     )
-                )
-        messages.append(CurrencyService.fetch_currency())
+            except Exception as exc:  # pragma: no cover - runtime safeguard
+                logger.exception("Ошибка погоды для id=%s город=%s: %s", profile.get("user_id"), profile.get("city"), exc)
+        try:
+            messages.append(CurrencyService.fetch_currency())
+        except Exception as exc:  # pragma: no cover
+            logger.exception("Ошибка валют для id=%s: %s", profile.get("user_id"), exc)
         group = profile.get("group")
         scope = profile.get("broadcast_scope", "day")
         if group:
-            schedule = ScheduleParser.load_or_fetch(group)
-            messages.append(ScheduleParser.format_schedule(group, schedule, scope))
+            try:
+                schedule = ScheduleParser.load_or_fetch(group)
+                messages.append(ScheduleParser.format_schedule(group, schedule, scope))
+            except Exception as exc:  # pragma: no cover
+                logger.exception("Ошибка расписания для id=%s группа=%s: %s", profile.get("user_id"), group, exc)
         return [m for m in messages if m]
 
     async def cancel(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -478,9 +523,11 @@ class NotificationBot:
         for profile in data_manager.list_profiles():
             if profile.get("broadcast_time") and profile.get("timezone"):
                 self._schedule_broadcast_job(profile)
+        logger.info("Загружены профили: %s", len(data_manager.list_profiles()))
         await ReminderService.schedule_all(self.application.job_queue, self.application.bot)
 
     def run(self):
+        logger.info("Запуск polling бота")
         self.application.run_polling()
 
 

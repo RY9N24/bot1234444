@@ -21,6 +21,25 @@ class ReminderService:
         logger.info("Сохранено напоминание id=%s для пользователя=%s", entry.get("id"), entry.get("user_id"))
 
     @staticmethod
+    def save_or_update(entry: Dict):
+        reminders = load_reminders()
+        updated = False
+        for idx, existing in enumerate(reminders):
+            if existing.get("id") == entry.get("id"):
+                reminders[idx] = entry
+                updated = True
+                break
+        if not updated:
+            reminders.append(entry)
+        save_reminders(reminders)
+        logger.info(
+            "%s напоминание id=%s для пользователя=%s",
+            "Обновлено" if updated else "Добавлено",
+            entry.get("id"),
+            entry.get("user_id"),
+        )
+
+    @staticmethod
     def replace_reminders(reminders: List[Dict]):
         save_reminders(reminders)
 
@@ -38,6 +57,10 @@ class ReminderService:
     @staticmethod
     def list_for_user(user_id: int) -> List[Dict]:
         return [r for r in load_reminders() if r.get("user_id") == user_id]
+
+    @staticmethod
+    def get(reminder_id: str) -> Optional[Dict]:
+        return next((r for r in load_reminders() if r.get("id") == reminder_id), None)
 
     @staticmethod
     def build_send_time(city_tz: str, target_dt_str: str) -> Optional[dt.datetime]:
@@ -82,13 +105,14 @@ class ReminderService:
                 )
                 logger.info("Просроченное напоминание отправлено id=%s", rem["id"])
             else:
+                delay = max(0, (send_at - now).total_seconds())
                 job_queue.run_once(
                     ReminderService._send_job,
-                    when=send_at,
+                    when=delay,
                     name=f"reminder-{rem['id']}",
                     data={"user_id": rem["user_id"], "message": rem["message"]},
                 )
-                logger.info("Напоминание %s запланировано на %s", rem["id"], send_at.isoformat())
+                logger.info("Напоминание %s запланировано через %.1f секунд", rem["id"], delay)
 
         if overdue_ids:
             ReminderService.remove(overdue_ids)

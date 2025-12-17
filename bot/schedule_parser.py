@@ -9,19 +9,21 @@ from .data_manager import save_schedule_cache
 
 logger = logging.getLogger(__name__)
 
-SEARCH_URL = "https://lk.tolgas.ru/public-schedule/search/"
+GROUP_URL = "https://lk.tolgas.ru/public-schedule/group"
 
 
 class ScheduleParser:
     @staticmethod
-    def fetch_group_schedule(group: str) -> Optional[Dict[str, List[str]]]:
-        """
-        Parse weekly schedule for the given group.
+    def fetch_group_schedule(group: str, start: Optional[dt.date] = None, end: Optional[dt.date] = None) -> Optional[Dict[str, List[str]]]:
+        """Парсит расписание по прямой ссылке вида
+        https://lk.tolgas.ru/public-schedule/group?id=<GROUP>&dateFrom=YYYY-MM-DD&dateTo=YYYY-MM-DD"""
 
-        Returns mapping of date string -> list of lessons.
-        """
+        start = start or dt.date.today()
+        if end is None:
+            end = start + dt.timedelta(days=6)
+        params = {"id": group, "dateFrom": start.isoformat(), "dateTo": end.isoformat()}
         try:
-            resp = requests.get(SEARCH_URL, params={"group": group}, timeout=10)
+            resp = requests.get(GROUP_URL, params=params, timeout=15)
             if resp.status_code != 200:
                 logger.warning("Не удалось получить расписание для %s: %s", group, resp.status_code)
                 return None
@@ -29,9 +31,10 @@ class ScheduleParser:
         except Exception as exc:  # pragma: no cover
             logger.exception("Ошибка при загрузке расписания для %s: %s", group, exc)
             return None
+
         table = soup.find("table")
         if not table:
-            logger.warning("Ответ без таблицы расписания для %s", group)
+            logger.warning("Ответ без таблицы расписания для %s (url %s)", group, resp.url)
             return None
 
         schedule: Dict[str, List[str]] = {}
@@ -40,17 +43,26 @@ class ScheduleParser:
             if len(cols) < 2:
                 continue
             date_label = cols[0]
-            lessons = cols[1:]
+            lessons = [c for c in cols[1:] if c]
             schedule.setdefault(date_label, []).extend(lessons)
         if schedule:
-            logger.info("Спарсили %s дней расписания для %s", len(schedule), group)
+            logger.info(
+                "Спарсили %s дней расписания для %s на период %s — %s",
+                len(schedule),
+                group,
+                start.isoformat(),
+                end.isoformat(),
+            )
         return schedule if schedule else None
 
     @staticmethod
     def refresh_cache(groups: List[str]) -> Dict[str, Dict[str, List[str]]]:
         cache: Dict[str, Dict[str, List[str]]] = {}
+        today = dt.date.today()
+        start = today - dt.timedelta(days=today.weekday())
+        end = start + dt.timedelta(days=6)
         for group in groups:
-            parsed = ScheduleParser.fetch_group_schedule(group)
+            parsed = ScheduleParser.fetch_group_schedule(group, start=start, end=end)
             if parsed:
                 cache[group] = parsed
         logger.info("Кеш расписаний обновлён для %s групп", len(cache))
@@ -76,8 +88,10 @@ class ScheduleParser:
         scope_label = "день" if scope == "day" else "неделя"
         lines = [f"📚 Расписание — {group} ({scope_label})"]
         for date_label, lessons in schedule.items():
-            if scope == "day" and str(today.day) not in date_label and str(today) not in date_label:
-                continue
+            if scope == "day":
+                today_label = today.strftime("%d.%m.%Y")
+                if today_label not in date_label and str(today) not in date_label:
+                    continue
             lines.append(f"\n📅 {date_label}")
             if not lessons:
                 lines.append("• Выходной")

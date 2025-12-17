@@ -61,7 +61,14 @@ def upsert_profile(profile: Dict[str, Any]):
 
 def get_profile(user_id: int) -> Dict[str, Any] | None:
     profiles: List[Dict[str, Any]] = load_json(PROFILES_FILE, [])
-    return next((p for p in profiles if p.get("user_id") == user_id), None)
+    profile = next((p for p in profiles if p.get("user_id") == user_id), None)
+    if profile is not None and "broadcast_times" not in profile:
+        times = []
+        if profile.get("broadcast_time"):
+            times.append(profile["broadcast_time"])
+        profile["broadcast_times"] = times
+        upsert_profile(profile)
+    return profile
 
 
 def list_profiles() -> List[Dict[str, Any]]:

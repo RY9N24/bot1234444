@@ -60,11 +60,13 @@ class NotificationBot:
         app.add_handler(CommandHandler("help", self.help))
 
         app.add_handler(CallbackQueryHandler(self.broadcast_now, pattern="^broadcast_now"))
+        app.add_handler(CallbackQueryHandler(self.handle_profile_action, pattern="^(profile_toggle_scope|del_time_|noop)"))
 
         app.add_handler(ConversationHandler(
             entry_points=[
                 CommandHandler("setgroup", self.ask_group),
                 MessageHandler(filters.Regex("^👥 Выбрать группу$"), self.ask_group),
+                CallbackQueryHandler(self.ask_group, pattern="^profile_set_group$"),
             ],
             states={
                 GROUP_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.save_group)],
@@ -76,6 +78,7 @@ class NotificationBot:
             entry_points=[
                 CommandHandler("setcity", self.ask_city),
                 MessageHandler(filters.Regex("^📍 Выбрать город$"), self.ask_city),
+                CallbackQueryHandler(self.ask_city, pattern="^profile_set_city$"),
             ],
             states={
                 CITY_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.save_city)],
@@ -86,7 +89,8 @@ class NotificationBot:
         app.add_handler(ConversationHandler(
             entry_points=[
                 CommandHandler("setbroadcast", self.ask_broadcast_time),
-                MessageHandler(filters.Regex("^⏰ Время рассылки$"), self.ask_broadcast_time),
+                MessageHandler(filters.Regex("^➕ Добавить время$"), self.ask_broadcast_time),
+                CallbackQueryHandler(self.ask_broadcast_time, pattern="^profile_add_time$"),
             ],
             states={
                 BROADCAST_TIME_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.save_broadcast_time)],
@@ -98,7 +102,7 @@ class NotificationBot:
         app.add_handler(ConversationHandler(
             entry_points=[
                 CommandHandler("new_reminder", self.reminder_text),
-                MessageHandler(filters.Regex("^🔔 Напоминание$"), self.reminder_text),
+                MessageHandler(filters.Regex("^🔔 Новое напоминание$"), self.reminder_text),
             ],
             states={
                 REM_TEXT_STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, self.reminder_pick_date)],
@@ -111,17 +115,58 @@ class NotificationBot:
         app.add_handler(CallbackQueryHandler(self.handle_reminder_action, pattern="^reminder_action"))
         app.add_handler(MessageHandler(filters.Regex("^🚀 Сообщение сейчас$"), self.broadcast_now_message))
         app.add_handler(MessageHandler(filters.Regex("^ℹ️ Профиль$"), self.profile))
+        app.add_handler(MessageHandler(filters.Regex("^📅 Мои напоминания$"), self.reminder_menu))
 
     @staticmethod
     def _main_menu():
         return ReplyKeyboardMarkup(
             [
-                ["📍 Выбрать город", "👥 Выбрать группу"],
-                ["⏰ Время рассылки", "🚀 Сообщение сейчас"],
-                ["🔔 Напоминание", "ℹ️ Профиль"],
+                ["🚀 Сообщение сейчас"],
+                ["🔔 Новое напоминание", "📅 Мои напоминания"],
+                ["ℹ️ Профиль"],
             ],
             resize_keyboard=True,
         )
+
+    @staticmethod
+    def _status_label(value, title, fallback_action):
+        if value:
+            return f"✅ {title}: {value}"
+        return f"❌ {fallback_action}"
+
+    def _profile_keyboard(self, profile):
+        times = profile.get("broadcast_times") or []
+        legacy = profile.get("broadcast_time")
+        if legacy and legacy not in times:
+            times.append(legacy)
+        rows = [
+            [
+                InlineKeyboardButton(
+                    self._status_label(profile.get("city"), "Город", "Заполнить город"),
+                    callback_data="profile_set_city",
+                ),
+                InlineKeyboardButton(
+                    self._status_label(profile.get("group"), "Группа", "Заполнить группу"),
+                    callback_data="profile_set_group",
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    f"📅 Охват: {'день' if profile.get('broadcast_scope', 'day') == 'day' else 'неделя'}",
+                    callback_data="profile_toggle_scope",
+                )
+            ],
+            [InlineKeyboardButton("➕ Добавить время", callback_data="profile_add_time")],
+        ]
+        for t in sorted(times):
+            rows.append(
+                [
+                    InlineKeyboardButton(f"🕑 {t}", callback_data="noop"),
+                    InlineKeyboardButton(f"🗑 Удалить {t}", callback_data=f"del_time_{t}"),
+                ]
+            )
+        rows.append([InlineKeyboardButton("📅 Мои напоминания", callback_data="reminder_action_list")])
+        return InlineKeyboardMarkup(rows)
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user = update.effective_user
@@ -134,17 +179,16 @@ class NotificationBot:
             "timezone": None,
             "group": None,
             "broadcast_time": None,
+            "broadcast_times": [],
             "broadcast_scope": "day",
         }
         data_manager.upsert_profile(profile)
         text = (
-            "👋 Добро пожаловать! Все основные действия доступны на кнопках ниже.\n\n"
-            "• 📍 Город — выбрать город и часовой пояс\n"
-            "• 👥 Группа — указать учебную группу\n"
-            "• ⏰ Время рассылки — настроить ежедневное сообщение\n"
-            "• 🔔 Напоминание — создать или просмотреть личные напоминания\n"
-            "• 🚀 Сообщение сейчас — получить итоговое сообщение в любой момент\n"
-            "• ℹ️ Профиль — увидеть текущие настройки"
+            "👋 Добро пожаловать! Главное меню стало проще — все настройки внутри профиля.\n\n"
+            "• 🚀 Сообщение сейчас — получить итог прямо сейчас\n"
+            "• 🔔 Новое напоминание — создать напоминание\n"
+            "• 📅 Мои напоминания — посмотреть, изменить или удалить\n"
+            "• ℹ️ Профиль — статусы и быстрые кнопки для города, группы и рассылок"
         )
         await update.message.reply_text(text, reply_markup=self._main_menu())
 
@@ -164,15 +208,18 @@ class NotificationBot:
             "ℹ️ Профиль\n"
             f"ID: {profile['user_id']}\n"
             f"Ник: @{profile.get('username')}\n"
-            f"Город: {profile.get('city')}\n"
-            f"Часовой пояс: {profile.get('timezone')}\n"
-            f"Группа: {profile.get('group')}\n"
-            f"Время рассылки: {profile.get('broadcast_time')} ({profile.get('broadcast_scope')})"
+            f"Режим расписания: {profile.get('broadcast_scope', 'day')}\n"
+            "\nСтатусы:"
         )
+        keyboard = self._profile_keyboard(profile)
         await update.message.reply_text(text, reply_markup=self._main_menu())
+        await update.message.reply_text("Настройки:", reply_markup=keyboard)
 
     async def ask_group(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text(
+        target = update.callback_query.message if update.callback_query else update.message
+        if update.callback_query:
+            await update.callback_query.answer()
+        await target.reply_text(
             "👥 Укажите вашу группу (например, БРБ24). Я сверю её с официальным списком.",
             reply_markup=self._main_menu(),
         )
@@ -199,7 +246,10 @@ class NotificationBot:
         return ConversationHandler.END
 
     async def ask_city(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text(
+        target = update.callback_query.message if update.callback_query else update.message
+        if update.callback_query:
+            await update.callback_query.answer()
+        await target.reply_text(
             "📍 Напишите город проживания — я подберу часовой пояс автоматически.",
             reply_markup=self._main_menu(),
         )
@@ -229,7 +279,10 @@ class NotificationBot:
         return ConversationHandler.END
 
     async def ask_broadcast_time(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        await update.message.reply_text(
+        target = update.callback_query.message if update.callback_query else update.message
+        if update.callback_query:
+            await update.callback_query.answer()
+        await target.reply_text(
             "⏰ Укажите время рассылки в формате ЧЧ:ММ (ваш часовой пояс).",
             reply_markup=self._main_menu(),
         )
@@ -259,11 +312,14 @@ class NotificationBot:
         scope = "day" if query.data.endswith("day") else "week"
         time_str = context.user_data.get("broadcast_time")
         profile = data_manager.get_profile(query.from_user.id) or {"user_id": query.from_user.id, "username": query.from_user.username}
-        profile.update({"broadcast_time": time_str, "broadcast_scope": scope})
+        times = profile.get("broadcast_times") or []
+        if time_str not in times:
+            times.append(time_str)
+        profile.update({"broadcast_time": time_str, "broadcast_times": times, "broadcast_scope": scope})
         data_manager.upsert_profile(profile)
         scope_label = "день" if scope == "day" else "неделя"
         await query.edit_message_text(f"✅ Время рассылки: {time_str}\n📅 Охват: {scope_label}")
-        self._schedule_broadcast_job(profile)
+        self._reschedule_broadcasts(profile)
         logger.info(
             "Настроена рассылка id=%s на %s (%s)",
             query.from_user.id,
@@ -273,15 +329,28 @@ class NotificationBot:
         return ConversationHandler.END
 
     async def reminder_menu(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        reminders = ReminderService.list_for_user(update.effective_user.id)
+        target = update.callback_query.message if update.callback_query else update.message
+        if update.callback_query:
+            await update.callback_query.answer()
+        user_id = update.effective_user.id
+        reminders = ReminderService.list_for_user(user_id)
         lines = ["🔔 Ваши напоминания:"]
+        keyboard_rows = []
         for r in reminders:
             lines.append(f"• {r['message']} — {r['send_at_local']}")
+            keyboard_rows.append(
+                [
+                    InlineKeyboardButton(
+                        f"✏️ Изменить время", callback_data=f"reminder_action_edit_{r['id']}"
+                    ),
+                    InlineKeyboardButton(f"🗑 Удалить", callback_data=f"reminder_action_delete_{r['id']}")
+                ]
+            )
         if len(lines) == 1:
             lines.append("Пока нет активных напоминаний.")
-        keyboard = [[InlineKeyboardButton("Создать напоминание", callback_data="reminder_action_new")]]
-        logger.info("Запрошен список напоминаний id=%s (кол-во=%s)", update.effective_user.id, len(reminders))
-        await update.message.reply_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(keyboard))
+        keyboard_rows.append([InlineKeyboardButton("Создать напоминание", callback_data="reminder_action_new")])
+        logger.info("Запрошен список напоминаний id=%s (кол-во=%s)", user_id, len(reminders))
+        await target.reply_text("\n".join(lines), reply_markup=InlineKeyboardMarkup(keyboard_rows))
 
     async def handle_reminder_action(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
@@ -290,7 +359,47 @@ class NotificationBot:
             await query.edit_message_text("Напишите сообщение, которое хотите увидеть позже:")
             context.user_data["from_button"] = True
             return REM_TEXT_STATE
+        if "delete" in query.data:
+            reminder_id = query.data.split("_")[-1]
+            ReminderService.remove([reminder_id])
+            await query.edit_message_text("🗑 Напоминание удалено")
+            return ConversationHandler.END
+        if "edit" in query.data:
+            reminder_id = query.data.split("_")[-1]
+            context.user_data["edit_reminder_id"] = reminder_id
+            await query.edit_message_text("Напишите новое время для напоминания — сначала выберите дату")
+            return await self.reminder_pick_date(update, context)
         return ConversationHandler.END
+
+    async def handle_profile_action(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
+        if query.data == "noop":
+            return
+        profile = data_manager.get_profile(query.from_user.id)
+        if not profile:
+            await query.edit_message_text("Профиль не найден. Выполните /start")
+            return
+        if query.data.startswith("del_time_"):
+            time_str = query.data.split("_", 2)[2]
+            times = profile.get("broadcast_times") or []
+            if time_str in times:
+                times.remove(time_str)
+            if profile.get("broadcast_time") == time_str:
+                profile["broadcast_time"] = None
+            profile["broadcast_times"] = times
+            data_manager.upsert_profile(profile)
+            self._reschedule_broadcasts(profile)
+            await query.edit_message_reply_markup(reply_markup=self._profile_keyboard(profile))
+            await query.message.reply_text(f"🗑 Время {time_str} удалено из рассылок")
+            return
+        if query.data == "profile_toggle_scope":
+            new_scope = "week" if profile.get("broadcast_scope", "day") == "day" else "day"
+            profile["broadcast_scope"] = new_scope
+            data_manager.upsert_profile(profile)
+            await query.edit_message_reply_markup(reply_markup=self._profile_keyboard(profile))
+            await query.message.reply_text(f"📅 Охват расписания переключен на {'неделю' if new_scope == 'week' else 'день'}")
+            return
 
     async def reminder_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Напишите сообщение, которое хотите увидеть позже:")
@@ -298,8 +407,15 @@ class NotificationBot:
         return REM_TEXT_STATE
 
     async def reminder_pick_date(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        context.user_data["rem_text"] = update.message.text
-        today = dt.date.today()
+        if update.message:
+            context.user_data["rem_text"] = update.message.text
+        elif context.user_data.get("edit_reminder_id"):
+            existing = ReminderService.get(context.user_data["edit_reminder_id"])
+            if existing:
+                context.user_data["rem_text"] = existing.get("message")
+        profile = data_manager.get_profile(update.effective_user.id)
+        tz = ZoneInfo(profile.get("timezone")) if profile and profile.get("timezone") else dt.timezone.utc
+        today = dt.datetime.now(tz).date()
         buttons = []
         for i in range(14):
             target = today + dt.timedelta(days=i)
@@ -312,8 +428,10 @@ class NotificationBot:
         await query.answer()
         date_iso = query.data.split("_")[1]
         context.user_data["rem_date"] = date_iso
-        now = dt.datetime.now()
-        time_label = now.strftime("%H:%M")
+        profile = data_manager.get_profile(query.from_user.id)
+        tz = ZoneInfo(profile.get("timezone")) if profile and profile.get("timezone") else dt.timezone.utc
+        now_local = dt.datetime.now(tz)
+        time_label = now_local.strftime("%H:%M")
         keyboard = [
             [
                 InlineKeyboardButton("+30 мин", callback_data=f"time_add_{date_iso}_30"),
@@ -326,7 +444,7 @@ class NotificationBot:
             [InlineKeyboardButton("Указать вручную", callback_data=f"time_manual_{date_iso}")],
         ]
         await query.edit_message_text(
-            f"⏱ Сейчас (по серверу): {time_label}\nВыберите корректировку или укажите вручную.",
+            f"⏱ Сейчас ({tz}): {time_label}\nВыберите корректировку или укажите вручную.",
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
         context.user_data["rem_time"] = time_label
@@ -380,28 +498,33 @@ class NotificationBot:
         if send_at_utc <= dt.datetime.now(dt.timezone.utc):
             await context.bot.send_message(chat_id=user_id, text="Нельзя указать прошедшее время. Попробуйте снова.")
             return
-        entry = {
-            "id": str(uuid.uuid4()),
-            "user_id": user_id,
-            "message": text,
-            "send_at_local": local_str,
-            "send_at_utc": send_at_utc.isoformat(),
-        }
-        ReminderService.add_reminder(entry)
+        edit_id = context.user_data.get("edit_reminder_id")
+        entry_id = edit_id or str(uuid.uuid4())
+        ReminderService.save_or_update(
+            {
+                "id": entry_id,
+                "user_id": user_id,
+                "message": text,
+                "send_at_local": local_str,
+                "send_at_utc": send_at_utc.isoformat(),
+            }
+        )
+        delay = max(0, (send_at_utc - dt.datetime.now(dt.timezone.utc)).total_seconds())
         context.job_queue.run_once(
             ReminderService._send_job,
-            when=send_at_utc,
-            name=f"reminder-{entry['id']}",
+            when=delay,
+            name=f"reminder-{entry_id}",
             data={"user_id": user_id, "message": text},
         )
         await context.bot.send_message(chat_id=user_id, text="✅ Сообщение сохранено и ожидает отправки")
         logger.info(
-            "Создано напоминание id=%s для пользователя=%s на %s (локальное %s)",
-            entry["id"],
+            "Создано/обновлено напоминание id=%s для пользователя=%s на %s (локальное %s)",
+            entry_id,
             user_id,
             send_at_utc.isoformat(),
             local_str,
         )
+        context.user_data.pop("edit_reminder_id", None)
 
     async def broadcast_settings(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[InlineKeyboardButton("Сообщение сейчас", callback_data="broadcast_now")]]
@@ -440,20 +563,36 @@ class NotificationBot:
         await update.message.reply_text("\n\n".join(messages), reply_markup=self._main_menu())
         logger.info("Запрошена отправка сейчас через кнопку. id=%s блоков=%s", update.effective_user.id, len(messages))
 
-    def _schedule_broadcast_job(self, profile):
-        time_str = profile.get("broadcast_time")
+    def _reschedule_broadcasts(self, profile):
+        # remove existing jobs
+        user_id = profile.get("user_id")
+        for job in list(self.application.job_queue.jobs()):
+            if job.name and job.name.startswith(f"broadcast-{user_id}"):
+                job.schedule_removal()
+        times = profile.get("broadcast_times") or []
+        legacy = profile.get("broadcast_time")
+        if legacy and legacy not in times:
+            times.append(legacy)
         tz_name = profile.get("timezone")
-        if not time_str or not tz_name:
+        if not tz_name:
             return
-        hour, minute = map(int, time_str.split(":"))
         tzinfo = ZoneInfo(tz_name)
-        self.application.job_queue.run_daily(
-            self._broadcast_job,
-            time=dt.time(hour=hour, minute=minute, tzinfo=tzinfo),
-            name=f"broadcast-{profile['user_id']}",
-            data={"user_id": profile["user_id"]},
-        )
-        logger.info("Поставлена ежедневная рассылка для id=%s на %02d:%02d %s", profile["user_id"], hour, minute, tz_name)
+        for idx, time_str in enumerate(sorted(times)):
+            hour, minute = map(int, time_str.split(":"))
+            self.application.job_queue.run_daily(
+                self._broadcast_job,
+                time=dt.time(hour=hour, minute=minute, tzinfo=tzinfo),
+                name=f"broadcast-{user_id}-{idx}",
+                data={"user_id": user_id},
+            )
+            logger.info(
+                "Поставлена ежедневная рассылка для id=%s на %02d:%02d %s (idx=%s)",
+                user_id,
+                hour,
+                minute,
+                tz_name,
+                idx,
+            )
 
     async def _broadcast_job(self, context: ContextTypes.DEFAULT_TYPE):
         user_id = context.job.data["user_id"]
@@ -521,8 +660,8 @@ class NotificationBot:
     async def load_jobs(self):
         # schedule overdue reminders and broadcasts
         for profile in data_manager.list_profiles():
-            if profile.get("broadcast_time") and profile.get("timezone"):
-                self._schedule_broadcast_job(profile)
+            if (profile.get("broadcast_times") or profile.get("broadcast_time")) and profile.get("timezone"):
+                self._reschedule_broadcasts(profile)
         logger.info("Загружены профили: %s", len(data_manager.list_profiles()))
         await ReminderService.schedule_all(self.application.job_queue, self.application.bot)
 

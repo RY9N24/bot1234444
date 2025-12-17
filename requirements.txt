@@ -1,4 +1,4 @@
-python-telegram-bot==20.7
+python-telegram-bot[job-queue,rate-limiter]==20.7
 requests==2.31.0
 python-dateutil==2.9.0.post0
 pytz==2024.1

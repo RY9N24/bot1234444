@@ -654,7 +654,8 @@ class NotificationBot:
             logger.error(
                 "Обнаружен второй запущенный экземпляр бота (409 Conflict от getUpdates). Завершение текущего процесса."
             )
-            await self.application.stop()
+            if self.application.running:
+                await self.application.stop()
             return
         logger.exception("Необработанная ошибка: %s", err)
 
@@ -675,7 +676,7 @@ class NotificationBot:
 
     def run(self):
         logger.info("Запуск polling бота")
-        self.application.run_polling(drop_pending_updates=True)
+        self.application.run_polling(drop_pending_updates=True, allowed_updates=Update.ALL_TYPES)
 
 
 def build_app(token: str) -> NotificationBot:

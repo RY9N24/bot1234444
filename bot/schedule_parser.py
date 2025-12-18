@@ -22,9 +22,11 @@ class ScheduleParser:
         if end is None:
             end = start + dt.timedelta(days=6)
         params = {"id": group, "dateFrom": start.isoformat(), "dateTo": end.isoformat()}
-        headers = {"User-Agent": "Mozilla/5.0 (schedule-bot)"}
+        headers = {"User-Agent": "Mozilla/5.0 (schedule-bot)", "Accept-Language": "ru"}
         try:
-            resp = requests.get(GROUP_URL, params=params, timeout=15, headers=headers)
+            session = requests.Session()
+            session.trust_env = False  # avoid breaking behind restricted proxy environments
+            resp = session.get(GROUP_URL, params=params, timeout=15, headers=headers)
             if resp.status_code != 200:
                 logger.warning("Не удалось получить расписание для %s: %s", group, resp.status_code)
                 return None

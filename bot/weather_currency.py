@@ -17,8 +17,8 @@ class GeoInfo:
 
 GEOCODE_URL = "https://geocoding-api.open-meteo.com/v1/search"
 WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
-CURRENCY_URL = "https://api.exchangerate.host/latest"
-BTC_URL = "https://api.coindesk.com/v1/bpi/currentprice/USD.json"
+CURRENCY_URL = "https://www.cbr-xml-daily.ru/daily_json.js"
+BTC_URL = "https://api.binance.com/api/v3/ticker/price"
 
 
 class WeatherService:
@@ -85,22 +85,27 @@ class CurrencyService:
     @staticmethod
     def fetch_currency() -> str:
         parts = ["💱 Курсы валют"]
+        session = requests.Session()
+        session.trust_env = False
+
         try:
-            fx_resp = requests.get(CURRENCY_URL, params={"base": "USD", "symbols": "RUB,CNY"}, timeout=10)
+            fx_resp = session.get(CURRENCY_URL, timeout=10)
             fx_resp.raise_for_status()
-            fx_data = fx_resp.json()
-            rates = fx_data.get("rates", {})
-            rub = rates.get("RUB")
-            cny = rates.get("CNY")
+            fx_data = fx_resp.json().get("Valute", {})
+            usd = fx_data.get("USD", {})
+            cny_val = fx_data.get("CNY", {})
+            rub = usd.get("Value") if usd else None
+            # переводим курс USD/CNY в обратный (USD->CNY) если данные присутствуют
+            cny = (usd.get("Value") / cny_val.get("Value")) if usd and cny_val else None
         except Exception as exc:  # pragma: no cover
             logger.warning("Не удалось получить курсы валют: %s", exc)
             rub = cny = None
 
         try:
-            btc_resp = requests.get(BTC_URL, timeout=10)
+            btc_resp = session.get(BTC_URL, params={"symbol": "BTCUSDT"}, timeout=10)
             btc_resp.raise_for_status()
             btc_data = btc_resp.json()
-            btc_usd = btc_data.get("bpi", {}).get("USD", {}).get("rate")
+            btc_usd = btc_data.get("price")
         except Exception as exc:  # pragma: no cover
             logger.warning("Не удалось получить курс BTC: %s", exc)
             btc_usd = None
@@ -110,7 +115,7 @@ class CurrencyService:
         if cny is not None:
             parts.append(f"• USD → CNY: {cny:.4f}")
         if btc_usd:
-            parts.append(f"• BTC → USD: {btc_usd}")
+            parts.append(f"• BTC → USD: {float(btc_usd):.2f}")
 
         if len(parts) == 1:
             parts.append("Курсы временно недоступны.")
